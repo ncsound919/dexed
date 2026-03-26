@@ -124,7 +124,7 @@ void DexedAudioProcessorEditor::paint (Graphics& g) {
     g.fillRoundedRectangle(bounds, 0.0f);
 
     g.setColour(Colour(0x3347d8c7));
-    g.drawLine(12.0f, 578.0f, (float) getWidth() - 12.0f, 578.0f, 1.5f);
+    g.drawLine(12.0f, 578.0f * processor->getZoomFactor(), (float) getWidth() - 12.0f, 578.0f * processor->getZoomFactor(), 1.5f);
 }
 
 void DexedAudioProcessorEditor::cartShow() {
