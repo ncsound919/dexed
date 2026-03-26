@@ -24,6 +24,7 @@
 #include "ParamDialog.h"
 #include "SysexComm.h"
 #include "TuningShow.h"
+#include "ChordProgressionBuilder.h"
 #include "Dexed.h"
 #include "math.h"
 #include <fstream>
@@ -48,6 +49,7 @@ DexedAudioProcessorEditor::DexedAudioProcessorEditor (DexedAudioProcessor* owner
     addAndMakeVisible(&frameComponent);
     lookAndFeel->setDefaultLookAndFeel(lookAndFeel);
     background = lookAndFeel->background;
+    chordBuilder = std::make_unique<ChordProgressionBuilder>(*processor);
 
     // OPERATORS
     frameComponent.addAndMakeVisible(&(operators[0]));
@@ -76,10 +78,12 @@ DexedAudioProcessorEditor::DexedAudioProcessorEditor (DexedAudioProcessor* owner
 
     // add the midi keyboard component..
     frameComponent.addAndMakeVisible (&midiKeyboard);
+    frameComponent.addAndMakeVisible(chordBuilder.get());
 
     // The DX7 is a badass on the bass, keep it that way
     midiKeyboard.setLowestVisibleKey(24);
-    midiKeyboard.setBounds(4, 581, getWidth() - 8, 90);
+    chordBuilder->setBounds(10, 582, 846, 102);
+    midiKeyboard.setBounds(4, 687, WINDOW_SIZE_X - 8, 90);
     midiKeyboard.setTitle("Keyboard keys");
 
     frameComponent.addAndMakeVisible(&global);
@@ -111,14 +115,21 @@ DexedAudioProcessorEditor::~DexedAudioProcessorEditor() {
 
 //==============================================================================
 void DexedAudioProcessorEditor::paint (Graphics& g) {
-    g.setColour(background);
-    g.fillRoundedRectangle(0.0f, 0.0f, (float) getWidth(), (float) getHeight(), 0);
+    auto bounds = getLocalBounds().toFloat();
+    ColourGradient backgroundGradient(Colour(0xff0d1118), 0.0f, 0.0f,
+                                      Colour(0xff251f2d), (float) getWidth(), (float) getHeight(), false);
+    backgroundGradient.addColour(0.35, Colour(0xff142031));
+    g.setGradientFill(backgroundGradient);
+    g.fillRoundedRectangle(bounds, 0.0f);
+
+    g.setColour(Colour(0x3347d8c7));
+    g.drawLine(12.0f, 578.0f, (float) getWidth() - 12.0f, 578.0f, 1.5f);
 }
 
 void DexedAudioProcessorEditor::cartShow() {
     stopTimer();
     cartManager.resetActiveSysex();
-    cartManagerCover.setBounds(0, 0, WINDOW_SIZE_X , WINDOW_SIZE_Y - 94);
+    cartManagerCover.setBounds(0, 0, WINDOW_SIZE_X, frameComponent.getHeight());
     cartManager.setBounds(16, 16, cartManagerCover.getWidth() - 32, cartManagerCover.getHeight() - 32);
     cartManager.updateCartFilename();
     cartManagerCover.setVisible(true);
@@ -613,5 +624,8 @@ bool DexedAudioProcessorEditor::keyPressed(const KeyPress& key, Component* origi
 
 void DexedAudioProcessorEditor::resetSize() {
     float factor = processor->getZoomFactor();
+    const int contentHeight = processor->showKeyboard ? WINDOW_SIZE_Y : WINDOW_SIZE_Y - 94;
+    frameComponent.setBounds(0, 0, WINDOW_SIZE_X, contentHeight);
+    midiKeyboard.setVisible(processor->showKeyboard);
     setSize(WINDOW_SIZE_X * factor, (processor->showKeyboard ? WINDOW_SIZE_Y : WINDOW_SIZE_Y - 94) * factor);
 }

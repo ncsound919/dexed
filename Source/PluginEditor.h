@@ -28,6 +28,8 @@
 #include "DXLookNFeel.h"
 #include "CartManager.h"
 
+class ChordProgressionBuilder;
+
 //==============================================================================
 /**
 */
@@ -42,6 +44,7 @@ class DexedAudioProcessorEditor  : public AudioProcessorEditor, public ComboBox:
 
     SharedResourcePointer<DXLookNFeel> lookAndFeel;
     std::unique_ptr<juce::DialogWindow> dexedParameterDialog;
+    std::unique_ptr<ChordProgressionBuilder> chordBuilder;
     #ifdef DEXED_EVENT_DEBUG
         FocusLogger focusLogger;
     #endif
@@ -80,7 +83,7 @@ public:
     bool keyPressed(const KeyPress& key, Component* originatingComponent) override;
 
     static const int WINDOW_SIZE_X = 866;
-    static const int WINDOW_SIZE_Y = 674;
+    static const int WINDOW_SIZE_Y = 786;
 };
 
 
