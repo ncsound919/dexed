@@ -45,7 +45,8 @@ DexedAudioProcessorEditor::DexedAudioProcessorEditor (DexedAudioProcessor* owner
     setExplicitFocusOrder(1);
 
 
-    frameComponent.setBounds(0,0, WINDOW_SIZE_X, (processor->showKeyboard ? WINDOW_SIZE_Y : WINDOW_SIZE_Y - 94));
+    frameComponent.setBounds(0, 0, WINDOW_SIZE_X,
+                             (processor->showKeyboard ? WINDOW_SIZE_Y : WINDOW_SIZE_Y - KEYBOARD_HIDDEN_REDUCTION));
     addAndMakeVisible(&frameComponent);
     lookAndFeel->setDefaultLookAndFeel(lookAndFeel);
     background = lookAndFeel->background;
@@ -624,8 +625,8 @@ bool DexedAudioProcessorEditor::keyPressed(const KeyPress& key, Component* origi
 
 void DexedAudioProcessorEditor::resetSize() {
     float factor = processor->getZoomFactor();
-    const int contentHeight = processor->showKeyboard ? WINDOW_SIZE_Y : WINDOW_SIZE_Y - 94;
+    const int contentHeight = processor->showKeyboard ? WINDOW_SIZE_Y : WINDOW_SIZE_Y - KEYBOARD_HIDDEN_REDUCTION;
     frameComponent.setBounds(0, 0, WINDOW_SIZE_X, contentHeight);
     midiKeyboard.setVisible(processor->showKeyboard);
-    setSize(WINDOW_SIZE_X * factor, (processor->showKeyboard ? WINDOW_SIZE_Y : WINDOW_SIZE_Y - 94) * factor);
+    setSize(WINDOW_SIZE_X * factor, contentHeight * factor);
 }

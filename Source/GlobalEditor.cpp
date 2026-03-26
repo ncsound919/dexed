@@ -27,6 +27,12 @@
 
 //[MiscUserDefs] You can add your own user definitions and misc code here...
 
+namespace
+{
+constexpr const char* kDexedBadgeTitle = "DEXED NOVA";
+constexpr const char* kDexedBadgeSubtitle = "modern FM performance";
+}
+
 /**
  * Ugly but useful midi monitor to know if you are really sending/receiving something from the DX7
  * If the midi is not configured this component wont show up
@@ -556,10 +562,10 @@ void GlobalEditor::paint (juce::Graphics& g)
     g.drawRoundedRectangle(juce::Rectangle<float>(14.0f, 86.0f, 168.0f, 38.0f), 10.0f, 1.2f);
     g.setColour(Colour(0xffffd28c));
     g.setFont(Font(24.0f, Font::bold));
-    g.drawText("AERIS FM", 24, 88, 148, 20, Justification::centredLeft, false);
+    g.drawText(kDexedBadgeTitle, 24, 88, 148, 20, Justification::centredLeft, false);
     g.setColour(Colour(0xff8ea2bb));
     g.setFont(Font(10.0f, Font::plain));
-    g.drawText("vector chorus synth", 26, 108, 132, 10, Justification::centredLeft, false);
+    g.drawText(kDexedBadgeSubtitle, 26, 108, 132, 10, Justification::centredLeft, false);
 
     g.drawImage(imageLight, 300, 70, 14, 14, 0, monoMode->getToggleState() ? 28 : 0, 28, 28);
     g.drawImage(imageLight, 619, 102, 14, 14, 0, lfoSync->getToggleState() ? 28 : 0, 28, 28);

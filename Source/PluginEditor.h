@@ -84,6 +84,7 @@ public:
 
     static const int WINDOW_SIZE_X = 866;
     static const int WINDOW_SIZE_Y = 786;
+    static const int KEYBOARD_HIDDEN_REDUCTION = 94;
 };
 
 
