@@ -79,6 +79,7 @@ DexedAudioProcessorEditor::DexedAudioProcessorEditor (DexedAudioProcessor* owner
 
     // add the midi keyboard component..
     frameComponent.addAndMakeVisible (&midiKeyboard);
+    midiKeyboard.setVisible(processor->showKeyboard);
     frameComponent.addAndMakeVisible(chordBuilder.get());
 
     // The DX7 is a badass on the bass, keep it that way
