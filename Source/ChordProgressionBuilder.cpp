@@ -163,7 +163,7 @@ void ChordProgressionBuilder::refreshProgressionChoices(bool resetToDefaults)
 {
     const bool isMinorMode = modeSelector.getSelectedId() == 2;
     auto labels = isMinorMode ? minorDegrees : majorDegrees;
-    const int defaults[4] = { 1, isMinorMode ? 6 : 6, isMinorMode ? 3 : 4, isMinorMode ? 7 : 5 };
+    const int defaults[4] = { 1, 6, isMinorMode ? 3 : 4, isMinorMode ? 7 : 5 };
 
     for (int i = 0; i < (int) progressionSelectors.size(); ++i)
     {
