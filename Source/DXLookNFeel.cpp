@@ -88,16 +88,16 @@ DXLookNFeel::DXLookNFeel() {
     Colour ctrlBackground;
     
     DexedAudioProcessor::dexedAppDir.setAsCurrentWorkingDirectory();
-    ctrlBackground = Colour(20,18,18);
+    ctrlBackground = Colour(0xff101722);
 
     // WARNING! If you modify the colour IDs here, please actualize the file ''DexedTheme.md'' 
     // in the subdirectory ``~/dexed/Documentation/``    
 
-    REG_COLOUR(TextButton::buttonColourId,Colour(0xFF0FC00F));
-    REG_COLOUR(TextButton::textColourOnId, Colours::white);
-    REG_COLOUR(TextButton::textColourOffId, Colours::white);
-    REG_COLOUR(Slider::rotarySliderOutlineColourId,Colour(0xFF0FC00F));
-    REG_COLOUR(Slider::rotarySliderFillColourId,Colour(0xFFFFFFFF));
+    REG_COLOUR(TextButton::buttonColourId, fillColour);
+    REG_COLOUR(TextButton::textColourOnId, Colour(0xfff8f2e7));
+    REG_COLOUR(TextButton::textColourOffId, Colour(0xfff8f2e7));
+    REG_COLOUR(Slider::rotarySliderOutlineColourId, fillColour);
+    REG_COLOUR(Slider::rotarySliderFillColourId, Colour(0xffffd28c));
     REG_COLOUR(AlertWindow::backgroundColourId,lightBackground);
     REG_COLOUR(AlertWindow::textColourId, Colours::white);
     REG_COLOUR(TextEditor::backgroundColourId,ctrlBackground);
@@ -106,7 +106,7 @@ DXLookNFeel::DXLookNFeel() {
     REG_COLOUR(TextEditor::outlineColourId, Colours::transparentBlack);
     REG_COLOUR(ComboBox::backgroundColourId, ctrlBackground);
     REG_COLOUR(ComboBox::textColourId, Colours::white);
-    REG_COLOUR(ComboBox::buttonColourId, Colours::white);
+    REG_COLOUR(ComboBox::buttonColourId, fillColour);
     REG_COLOUR(PopupMenu::backgroundColourId, background);
     REG_COLOUR(PopupMenu::textColourId, Colours::white);
     REG_COLOUR(PopupMenu::highlightedTextColourId, Colours::white);
@@ -275,72 +275,97 @@ Typeface::Ptr DXLookNFeel::getTypefaceForFont(const Font &) {
 
 void DXLookNFeel::drawRotarySlider( Graphics &g, int x, int y, int width, int height, float sliderPosProportional,
      float rotaryStartAngle, float rotaryEndAngle,  Slider &slider ) {
+     const auto bounds = Rectangle<float>((float) x, (float) y, (float) width, (float) height).reduced(2.0f);
+     const float radius = jmin(bounds.getWidth(), bounds.getHeight()) * 0.5f;
+     const float centreX = bounds.getCentreX();
+     const float centreY = bounds.getCentreY();
+     const auto rotaryAngle = rotaryStartAngle + sliderPosProportional * (rotaryEndAngle - rotaryStartAngle);
+
+     g.setColour(Colour(0x33121d2b));
+     g.fillEllipse(bounds.expanded(1.0f));
+
+     Path halo;
+     halo.addCentredArc(centreX, centreY, radius + 1.5f, radius + 1.5f, 0.0f, rotaryStartAngle, rotaryEndAngle, true);
+     g.setColour(Colour(0x22ffffff));
+     g.strokePath(halo, PathStrokeType(2.0f));
+
      if ( imageKnob.isNull() ) {
          LookAndFeel_V4::drawRotarySlider(g, x, y, width, height, sliderPosProportional, rotaryStartAngle, rotaryEndAngle, slider);
-         return;
+     } else {
+         const double fractRotation = (slider.getValue() - slider.getMinimum())  /   (slider.getMaximum() - slider.getMinimum());
+         const int nFrames = imageKnob.getHeight()/imageKnob.getWidth();
+         const int frameIdx = (int) ceil(fractRotation * ((double) nFrames - 1.0));
+         g.drawImage(imageKnob, (int) bounds.getX(), (int) bounds.getY(), (int) bounds.getWidth(), (int) bounds.getHeight(),
+                     0, frameIdx * imageKnob.getWidth(), imageKnob.getWidth(), imageKnob.getWidth());
      }
 
-     const double fractRotation = (slider.getValue() - slider.getMinimum())  /   (slider.getMaximum() - slider.getMinimum()); //value between 0 and 1 for current amount of rotation
-     const int nFrames = imageKnob.getHeight()/imageKnob.getWidth(); // number of frames for vertical film strip
-     const int frameIdx = (int)ceil(fractRotation * ((double)nFrames-1.0) ); // current index from 0 --> nFrames-1
+     Path accentArc;
+     accentArc.addCentredArc(centreX, centreY, radius + 1.5f, radius + 1.5f, 0.0f, rotaryStartAngle, rotaryAngle, true);
+     g.setColour(fillColour);
+     g.strokePath(accentArc, PathStrokeType(2.2f));
 
-     //const float radius = jmin (width / 2.0f, height / 2.0f) ; // float multiplication by 0.5 is faster than division by 2.0
-     const float radius = jmin(width * 0.5f, height * 0.5f);
-     const float centreX = x + width * 0.5f;
-     const float centreY = y + height * 0.5f;
-     const float rx = centreX - radius - 1.0f;
-     const float ry = centreY - radius - 1.0f;
-
-     g.drawImage(imageKnob, (int)rx, (int)ry, 2*(int)radius, 2*(int)radius, 0, frameIdx*imageKnob.getWidth(), imageKnob.getWidth(), imageKnob.getWidth());
+     g.setColour(Colour(0xffffd28c));
+     g.fillEllipse(centreX - 2.0f + std::cos(rotaryAngle) * (radius - 9.0f),
+                   centreY - 2.0f + std::sin(rotaryAngle) * (radius - 9.0f),
+                   4.0f,
+                   4.0f);
 };
 
 void DXLookNFeel::drawToggleButton(Graphics& g, ToggleButton& button, bool isMouseOverButton, bool isButtonDown) {
-    if ( imageSwitch.isNull() ) {
-        LookAndFeel_V4::drawToggleButton(g, button, isMouseOverButton, isButtonDown);
-        return;
-    }
+    auto bounds = button.getLocalBounds().toFloat().reduced(2.0f);
+    auto track = bounds.withSizeKeepingCentre(jmin(bounds.getWidth(), 48.0f), jmin(bounds.getHeight(), 24.0f));
+    auto knobSize = track.getHeight() - 4.0f;
+    auto knobX = button.getToggleState() ? track.getRight() - knobSize - 2.0f : track.getX() + 2.0f;
 
-    // One would think there is a better way...
-    auto lb = dynamic_cast<LightedToggleButton *>( &button );
-    if( lb )
-    {
-        if( imageSwitchLighted.isNull() ) {
-            LookAndFeel_V4::drawToggleButton(g, button, isMouseOverButton, isButtonDown);
-            return;
-        }
-        g.drawImage(imageSwitchLighted, 0, 0, 48, 26, 0, button.getToggleState() ? 0 : 26, 48, 26);
+    g.setColour(button.getToggleState() ? fillColour : roundBackground.brighter(0.2f));
+    g.fillRoundedRectangle(track, track.getHeight() * 0.5f);
+
+    g.setColour(button.getToggleState() ? Colour(0x66ffffff) : Colour(0x33000000));
+    g.drawRoundedRectangle(track, track.getHeight() * 0.5f, 1.0f);
+
+    g.setColour(button.getToggleState() ? Colour(0xffffd28c) : Colour(0xffd6dde8));
+    g.fillEllipse(knobX, track.getY() + 2.0f, knobSize, knobSize);
+
+    if (button.getWidth() > 54 && button.getButtonText().isNotEmpty()) {
+        g.setColour(Colour(0xfff8f2e7));
+        g.setFont(Font(13.0f, Font::bold));
+        g.drawText(button.getButtonText(), 0, 0, button.getWidth(), button.getHeight(), Justification::centredRight, false);
     }
-    else
-        g.drawImage(imageSwitch, 0, 0, 48, 26, 0, button.getToggleState() ? 0 : 52, 96, 52);
-    
 }
 
 void DXLookNFeel::drawButtonBackground(Graphics &g, Button &button, const Colour& backgroundColour, bool isMouseOverButton, bool isButtonDown) {
-    if ( imageButton.isNull() ) {
-        LookAndFeel_V4::drawButtonBackground(g, button, backgroundColour, isMouseOverButton, isButtonDown);
-        return;
-    }
+    auto bounds = button.getLocalBounds().toFloat().reduced(0.5f);
+    auto baseColour = isButtonDown ? fillColour.darker(0.25f)
+                                   : (isMouseOverButton ? fillColour.brighter(0.08f) : fillColour);
 
-    int w = button.getWidth();
-    int l = button.getHeight();
+    ColourGradient buttonGradient(baseColour.brighter(0.25f), bounds.getTopLeft(),
+                                  baseColour.darker(0.28f), bounds.getBottomLeft(), false);
+    g.setGradientFill(buttonGradient);
+    g.fillRoundedRectangle(bounds, 8.0f);
 
-                    //      dx,  dy,  dw,  dl,   sx, sy,                    sw, sl
-    g.drawImage(imageButton, 0,   0,   3,  l,    0, isButtonDown ? 30 : 0,  3, 30);
-    g.drawImage(imageButton, 3,   0, w-6,  l,    3, isButtonDown ? 30 : 0, 44, 30);
-    g.drawImage(imageButton, w-3, 0,   3,  l,   47, isButtonDown ? 30 : 0, 47, 30);
+    g.setColour(Colour(0x44ffffff));
+    g.drawRoundedRectangle(bounds, 8.0f, 1.0f);
 }
 
 void DXLookNFeel::drawLinearSlider (Graphics& g, int x, int y, int width, int height,
                                  float sliderPos, float minSliderPos, float maxSliderPos,
-                                 const Slider::SliderStyle style, Slider& slider) {
-    if ( imageSlider.isNull() ) {
-        LookAndFeel_V4::drawLinearSliderThumb(g, x, y, width, height, sliderPos, minSliderPos, maxSliderPos, style, slider);
-        return;
-    }
+                                  const Slider::SliderStyle style, Slider& slider) {
+    ignoreUnused(maxSliderPos, style, slider);
 
-    int p = sliderPos - minSliderPos;
-    p -= 2;
-    g.drawImage(imageSlider, p, 0, 26, 26, 0, 0, 52, 52);
+    auto bounds = Rectangle<float>((float) x, (float) y, (float) width, (float) height);
+    auto track = bounds.withHeight(4.0f).withCentre(bounds.getCentre());
+    auto thumb = Rectangle<float>(sliderPos - 8.0f, bounds.getCentreY() - 8.0f, 16.0f, 16.0f);
+
+    g.setColour(roundBackground.brighter(0.25f));
+    g.fillRoundedRectangle(track, 2.0f);
+
+    g.setColour(fillColour);
+    g.fillRoundedRectangle(Rectangle<float>(track.getX(), track.getY(), sliderPos - minSliderPos, track.getHeight()), 2.0f);
+
+    g.setColour(Colour(0xffffd28c));
+    g.fillEllipse(thumb);
+    g.setColour(Colour(0x55ffffff));
+    g.drawEllipse(thumb, 1.0f);
 }
 
 void DXLookNFeel::positionComboBoxText(ComboBox& box, Label& label) {
@@ -355,8 +380,8 @@ void DXLookNFeel::positionComboBoxText(ComboBox& box, Label& label) {
     LookAndFeel_V4::positionComboBoxText(box, label);
 }
 
-Colour DXLookNFeel::fillColour = Colour(77,159,151);
-Colour DXLookNFeel::lightBackground = Colour(78,72,63);
-Colour DXLookNFeel::background = Colour(60,50,47);
-Colour DXLookNFeel::roundBackground = Colour(58,52,48);
+Colour DXLookNFeel::fillColour = Colour(0xff47d8c7);
+Colour DXLookNFeel::lightBackground = Colour(0xff242b38);
+Colour DXLookNFeel::background = Colour(0xff10151d);
+Colour DXLookNFeel::roundBackground = Colour(0xff1a2230);
 

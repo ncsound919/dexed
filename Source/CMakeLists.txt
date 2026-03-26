@@ -42,6 +42,7 @@ include_directories(../libs/MTS-ESP/Client)
 target_sources(${BaseTargetName} PRIVATE
 	AlgoDisplay.cpp
 	CartManager.cpp
+	ChordProgressionBuilder.cpp
 	DXComponents.cpp
 	DXLookNFeel.cpp
 	EngineMkI.cpp

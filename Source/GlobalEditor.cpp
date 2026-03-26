@@ -27,6 +27,12 @@
 
 //[MiscUserDefs] You can add your own user definitions and misc code here...
 
+namespace
+{
+constexpr const char* kDexedBadgeTitle = "DEXED NOVA";
+constexpr const char* kDexedBadgeSubtitle = "modern FM performance";
+}
+
 /**
  * Ugly but useful midi monitor to know if you are really sending/receiving something from the DX7
  * If the midi is not configured this component wont show up
@@ -514,10 +520,53 @@ GlobalEditor::~GlobalEditor()
 void GlobalEditor::paint (juce::Graphics& g)
 {
     //[UserPrePaint] Add your own custom painting code here..
+    auto bounds = getLocalBounds().toFloat().reduced(2.0f);
+    ColourGradient shell(Colour(0xff0f141d), bounds.getTopLeft(),
+                         Colour(0xff221b27), bounds.getBottomRight(), false);
+    shell.addColour(0.42, Colour(0xff12263a));
+    g.setGradientFill(shell);
+    g.fillRoundedRectangle(bounds, 16.0f);
+
+    g.setColour(Colour(0x1affffff));
+    g.fillRoundedRectangle(bounds.removeFromTop(34.0f), 16.0f);
+
+    g.setColour(Colour(0xff182131));
+    g.fillRoundedRectangle(juce::Rectangle<float>(10.0f, 42.0f, 240.0f, 92.0f), 12.0f);
+    g.fillRoundedRectangle(juce::Rectangle<float>(256.0f, 42.0f, 255.0f, 92.0f), 12.0f);
+    g.fillRoundedRectangle(juce::Rectangle<float>(516.0f, 42.0f, 168.0f, 92.0f), 12.0f);
+    g.fillRoundedRectangle(juce::Rectangle<float>(690.0f, 42.0f, 162.0f, 92.0f), 12.0f);
+
+    g.setOpacity(0.12f);
     g.drawImage(background, 0, 0, 864, 144, 0, 0, 1728, 288);
+    g.setOpacity(1.0f);
     //[/UserPrePaint]
 
     //[UserPaint] Add your own custom painting code here..
+    g.setColour(Colour(0x5547d8c7));
+    g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(2.0f), 16.0f, 1.6f);
+    g.drawLine(16.0f, 36.0f, 848.0f, 36.0f, 1.2f);
+
+    g.setColour(Colour(0xffffd28c));
+    g.setFont(Font(14.0f, Font::bold));
+    g.drawText("Performance", 16, 10, 120, 16, Justification::centredLeft, false);
+
+    g.setFont(Font(11.0f, Font::bold));
+    g.drawText("LFO / FILTER", 16, 44, 120, 14, Justification::centredLeft, false);
+    g.drawText("PITCH ENVELOPE", 260, 44, 128, 14, Justification::centredLeft, false);
+    g.drawText("ALGORITHM", 520, 44, 104, 14, Justification::centredLeft, false);
+    g.drawText("VOICE / OUTPUT", 694, 44, 126, 14, Justification::centredLeft, false);
+
+    g.setColour(Colour(0xff121a26));
+    g.fillRoundedRectangle(juce::Rectangle<float>(14.0f, 86.0f, 168.0f, 38.0f), 10.0f);
+    g.setColour(Colour(0x8047d8c7));
+    g.drawRoundedRectangle(juce::Rectangle<float>(14.0f, 86.0f, 168.0f, 38.0f), 10.0f, 1.2f);
+    g.setColour(Colour(0xffffd28c));
+    g.setFont(Font(24.0f, Font::bold));
+    g.drawText(kDexedBadgeTitle, 24, 88, 148, 20, Justification::centredLeft, false);
+    g.setColour(Colour(0xff8ea2bb));
+    g.setFont(Font(10.0f, Font::plain));
+    g.drawText(kDexedBadgeSubtitle, 26, 108, 132, 10, Justification::centredLeft, false);
+
     g.drawImage(imageLight, 300, 70, 14, 14, 0, monoMode->getToggleState() ? 28 : 0, 28, 28);
     g.drawImage(imageLight, 619, 102, 14, 14, 0, lfoSync->getToggleState() ? 28 : 0, 28, 28);
     g.drawImage(imageLight, 705, 102, 14, 14, 0, oscSync->getToggleState() ? 28 : 0, 28, 28);

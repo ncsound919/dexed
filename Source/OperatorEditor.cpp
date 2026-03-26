@@ -361,17 +361,43 @@ OperatorEditor::~OperatorEditor()
 void OperatorEditor::paint (juce::Graphics& g)
 {
     //[UserPrePaint] Add your own custom painting code here..
+    auto bounds = getLocalBounds().toFloat().reduced(2.0f);
+    ColourGradient shell(Colour(0xff0f141d), bounds.getTopLeft(),
+                         Colour(0xff261c26), bounds.getBottomRight(), false);
+    shell.addColour(0.38, Colour(0xff142236));
+    g.setGradientFill(shell);
+    g.fillRoundedRectangle(bounds, 14.0f);
+
+    g.setColour(Colour(0x1affffff));
+    g.fillRoundedRectangle(bounds.removeFromTop(30.0f), 14.0f);
+
+    g.setColour(Colour(0xff182131));
+    g.fillRoundedRectangle(juce::Rectangle<float>(10.0f, 48.0f, 82.0f, 158.0f), 10.0f);
+    g.fillRoundedRectangle(juce::Rectangle<float>(96.0f, 48.0f, 78.0f, 158.0f), 10.0f);
+    g.fillRoundedRectangle(juce::Rectangle<float>(178.0f, 48.0f, 99.0f, 158.0f), 10.0f);
+
+    g.setOpacity(0.18f);
     g.drawImage(background, 0, 0, 287, 218, 0, 0, 574, 436);
+    g.setOpacity(1.0f);
     //[/UserPrePaint]
 
     //[UserPaint] Add your own custom painting code here..
+    g.setColour(opSwitch->getToggleState() ? Colour(0x8047d8c7) : Colour(0x335d6978));
+    g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(2.0f), 14.0f, 1.8f);
+    g.drawLine(14.0f, 41.0f, 273.0f, 41.0f, 1.2f);
+
+    g.setColour(Colour(0xffffd28c));
+    g.setFont(Font(11.0f, Font::bold));
+    g.drawText("ENVELOPE", 14, 52, 82, 14, Justification::centredLeft, false);
+    g.drawText("TONE", 100, 52, 78, 14, Justification::centredLeft, false);
+    g.drawText("TRACK / MOD", 182, 52, 92, 14, Justification::centredLeft, false);
 
     if ( opSwitch->getToggleState() )
-        g.setColour(Colours::white);
+        g.setColour(Colour(0xffffd28c));
     else
-        g.setColour(DXLookNFeel::roundBackground);
+        g.setColour(Colour(0xff5a6574));
 
-    g.setFont(Font (30.00f, Font::plain));
+    g.setFont(Font (30.00f, Font::bold));
     g.drawText(opNum, 250, 14, 30, 30, Justification::centred, true);
 
     bool state = opMode->getToggleState();
