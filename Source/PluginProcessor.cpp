@@ -60,14 +60,12 @@
 			#pragma comment (lib, "comsupp.lib")
 		#endif
 	#endif
-
 #endif
 
 //==============================================================================
 DexedAudioProcessor::DexedAudioProcessor()
     : AudioProcessor(BusesProperties().withOutput("output", AudioChannelSet::stereo(), true)) {
 #ifdef DEBUG
-    // avoid creating the log file if it is in standalone mode
     if ( !JUCEApplication::isStandaloneApp() ) {
         Logger *tmp = Logger::getCurrentLogger();
         if ( tmp == NULL ) {
@@ -92,7 +90,6 @@ DexedAudioProcessor::DexedAudioProcessor()
     monoMode = 0;
 
     resolvAppDir();
-    
     initCtrl();
     sendSysexChange = true;
     normalizeDxVelocity = false;
@@ -109,12 +106,12 @@ DexedAudioProcessor::DexedAudioProcessor()
     
     loadPreference();
 
-    for (int note = 0; note < MAX_ACTIVE_NOTES; ++note) {
+    for (int note = 0; note < MAX_ACTIVE_NOTES; ++note)
         voices[note].dx7_note = NULL;
-    }
-    setCurrentProgram(0);    
+
+    setCurrentProgram(0);
     nextMidi = NULL;
-    midiMsg = NULL;
+    midiMsg  = NULL;
     
     mtsClient = NULL;
     mtsClient = MTS_RegisterClient();
@@ -122,10 +119,10 @@ DexedAudioProcessor::DexedAudioProcessor()
 
 DexedAudioProcessor::~DexedAudioProcessor() {
     Logger *tmp = Logger::getCurrentLogger();
-	if ( tmp != NULL ) {
-		Logger::setCurrentLogger(NULL);
-		delete tmp;
-	}
+    if ( tmp != NULL ) {
+        Logger::setCurrentLogger(NULL);
+        delete tmp;
+    }
     TRACE("Bye");
     if (mtsClient) MTS_DeregisterClient(mtsClient);
 }
@@ -144,32 +141,38 @@ void DexedAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock) 
     for (int note = 0; note < MAX_ACTIVE_NOTES; ++note) {
         voices[note].dx7_note = new Dx7Note(synthTuningState, mtsClient);
         voices[note].midi_note = -1;
-        voices[note].keydown = false;
+        voices[note].keydown   = false;
         voices[note].sustained = false;
-        voices[note].live = false;
+        voices[note].live      = false;
         voices[note].keydown_seq = -1;
     }
 
-    currentNote = 0;
+    currentNote  = 0;
     nextKeydownSeq = 0;
     controllers.values_[kControllerPitch] = 0x2000;
-    controllers.modwheel_cc = 0;
-    controllers.foot_cc = 0;
-    controllers.breath_cc = 0;
+    controllers.modwheel_cc  = 0;
+    controllers.foot_cc      = 0;
+    controllers.breath_cc    = 0;
     controllers.aftertouch_cc = 0;
     controllers.portamento_enable_cc = false;
     controllers.portamento_cc = 0;
-	controllers.refresh();
+    controllers.refresh();
 
     sustain = false;
     extra_buf_size = 0;
 
     keyboardState.reset();
-    
     lfo.reset(data + 137);
     
     nextMidi = new MidiMessage(0xF0);
-	midiMsg = new MidiMessage(0xF0);
+    midiMsg  = new MidiMessage(0xF0);
+
+    // NCS: prepare new engines
+    driftEngine.prepare(sampleRate);
+    harmonicEngine.reset();
+    bassEngine.reset();
+    for (auto& osc : hybridOscs)
+        osc.prepare(sampleRate);
 }
 
 void DexedAudioProcessor::releaseResources() {
@@ -180,20 +183,14 @@ void DexedAudioProcessor::releaseResources() {
             delete voices[note].dx7_note;
             voices[note].dx7_note = NULL;
         }
-        voices[note].keydown = false;
+        voices[note].keydown   = false;
         voices[note].sustained = false;
-        voices[note].live = false;
+        voices[note].live      = false;
     }
 
     keyboardState.reset();
-    if ( nextMidi != NULL ) {
-        delete nextMidi;
-        nextMidi = NULL;
-    }
-    if ( midiMsg != NULL ) {
-        delete midiMsg;
-        midiMsg = NULL;
-    }
+    if ( nextMidi != NULL ) { delete nextMidi; nextMidi = NULL; }
+    if ( midiMsg  != NULL ) { delete midiMsg;  midiMsg  = NULL; }
 }
 
 void DexedAudioProcessor::processBlock(AudioSampleBuffer& buffer, MidiBuffer& midiMessages) {
@@ -204,50 +201,59 @@ void DexedAudioProcessor::processBlock(AudioSampleBuffer& buffer, MidiBuffer& mi
     int i;
     
     if ( refreshVoice ) {
-        for(i=0;i < MAX_ACTIVE_NOTES;i++) {
+        for (i = 0; i < MAX_ACTIVE_NOTES; i++)
             if ( voices[i].live )
                 voices[i].dx7_note->update(data, voices[i].midi_note, voices[i].velocity, voices[i].channel);
-        }
         lfo.reset(data + 137);
         refreshVoice = false;
+    }
+
+    // NCS: Step 1 — update drift states for this block
+    driftEngine.processBlock(numSamples);
+
+    // NCS: Step 2 — inject chord + bass MIDI before FM engine processes them
+    {
+        juce::AudioPlayHead::CurrentPositionInfo pos;
+        pos.bpm         = 120.0;
+        pos.isPlaying   = false;
+        pos.ppqPosition = 0.0;
+        if (auto* ph = getPlayHead())
+            ph->getCurrentPosition(pos);
+
+        harmonicEngine.process(pos, midiMessages, numSamples, getSampleRate());
+        bassEngine.process(pos, midiMessages, numSamples, getSampleRate(),
+                           ncsLastChordRoot, ncsLastChordNotes);
     }
 
     keyboardState.processNextMidiBuffer(midiMessages, 0, numSamples, true);
     
     MidiBuffer::Iterator it(midiMessages);
-    hasMidiMessage = it.getNextEvent(*nextMidi,midiEventPos);
+    hasMidiMessage = it.getNextEvent(*nextMidi, midiEventPos);
 
     float *channelData = buffer.getWritePointer(0);
   
-    // flush first events
-    for (i=0; i < numSamples && i < extra_buf_size; i++) {
+    for (i = 0; i < numSamples && i < extra_buf_size; i++)
         channelData[i] = extra_buf[i];
-    }
     
-    // remaining buffer is still to be processed
     if (extra_buf_size > numSamples) {
-        for (int j = 0; j < extra_buf_size - numSamples; j++) {
+        for (int j = 0; j < extra_buf_size - numSamples; j++)
             extra_buf[j] = extra_buf[j + numSamples];
-        }
         extra_buf_size -= numSamples;
-        
-        // flush the events, they will be process in the next cycle
-        while(getNextEvent(&it, numSamples)) {
+        while (getNextEvent(&it, numSamples))
             processMidiMessage(midiMsg);
-        }
     } else {
         for (; i < numSamples; i += N) {
             AlignedBuf<int32_t, N> audiobuf;
             float sumbuf[N];
             
-            while(getNextEvent(&it, i)) {
+            while (getNextEvent(&it, i))
                 processMidiMessage(midiMsg);
-            }
             
             for (int j = 0; j < N; ++j) {
                 audiobuf.get()[j] = 0;
                 sumbuf[j] = 0;
             }
+
             int32_t lfovalue = lfo.getsample();
             int32_t lfodelay = lfo.getdelay();
             
@@ -256,73 +262,95 @@ void DexedAudioProcessor::processBlock(AudioSampleBuffer& buffer, MidiBuffer& mi
             
             for (int note = 0; note < MAX_ACTIVE_NOTES; ++note) {
                 if (voices[note].live) {
-                    
                     if (checkMTSESPRetuning)
                         voices[note].dx7_note->updateBasePitches();
                     
-                    voices[note].dx7_note->compute(audiobuf.get(), lfovalue, lfodelay, &controllers);
+                    // NCS: apply pitch drift to fine tune before render
+                    if (driftEngine.isEnabled()) {
+                        float pitchCents = driftEngine.getVoicePitchDrift(note);
+                        // controllers.masterTune is in units; 1 unit ~ 1 cent at centre
+                        // We temporarily offset per-note fine tune via masterTune delta
+                        // A cleaner approach is to call dx7_note->update() with modified data,
+                        // but a lightweight approach is to stash and restore masterTune:
+                        int savedTune = controllers.masterTune;
+                        controllers.masterTune = savedTune + (int)(pitchCents * 100.0f);
+                        controllers.refresh();
+                        voices[note].dx7_note->compute(audiobuf.get(), lfovalue, lfodelay, &controllers);
+                        controllers.masterTune = savedTune;
+                        controllers.refresh();
+                    } else {
+                        voices[note].dx7_note->compute(audiobuf.get(), lfovalue, lfodelay, &controllers);
+                    }
                     
-                    for (int j=0; j < N; ++j) {
+                    float levelScale = driftEngine.isEnabled()
+                                       ? driftEngine.getVoiceLevelDrift(note)
+                                       : 1.0f;
+
+                    for (int j = 0; j < N; ++j) {
                         int32_t val = audiobuf.get()[j];
-                        
                         val = val >> 4;
                         int clip_val = val < -(1 << 24) ? 0x8000 : val >= (1 << 24) ? 0x7fff : val >> 9;
                         float f = ((float) clip_val) / (float) 0x8000;
-                        if( f > 1 ) f = 1;
-                        if( f < -1 ) f = -1;
-                        sumbuf[j] += f;
+                        if (f >  1) f =  1;
+                        if (f < -1) f = -1;
+                        sumbuf[j] += f * levelScale;
                         audiobuf.get()[j] = 0;
+                    }
+
+                    // NCS: mix hybrid oscillator on top of FM for this voice
+                    if (hybridMixLevel > 0.0f && hybridOscs[note].isActive()) {
+                        int jmax = numSamples - i;
+                        // Build a temp stereo block and add into sumbuf (mono L only for now)
+                        std::vector<float> hybBuf(N * 2, 0.0f);
+                        hybridOscs[note].processAdd(hybBuf.data(), N, hybridMixLevel);
+                        for (int j = 0; j < N && j < jmax; ++j)
+                            sumbuf[j] += hybBuf[j * 2];  // L channel
                     }
                 }
             }
             
             int jmax = numSamples - i;
             for (int j = 0; j < N; ++j) {
-                if (j < jmax) {
+                if (j < jmax)
                     channelData[i + j] = sumbuf[j];
-                } else {
+                else
                     extra_buf[j - jmax] = sumbuf[j];
-                }
             }
         }
         extra_buf_size = i - numSamples;
     }
     
-    while(getNextEvent(&it, numSamples)) {
+    while (getNextEvent(&it, numSamples))
         processMidiMessage(midiMsg);
-    }
 
     fx.process(channelData, numSamples);
 
-    for(i=0; i<numSamples; i++) {
+    for (i = 0; i < numSamples; i++) {
         float s = std::abs(channelData[i]);
-
         if (s > vuSignal)
             vuSignal = s;
-        else if (vuSignal > /*0.001f*/ 1.26E-4F) // 1.26E-4 is equivalent to -39 dB, the min amplitude associated to leftmost LED
+        else if (vuSignal > 1.26E-4F)
             vuSignal *= vuDecayFactor;
         else
             vuSignal = 0;
     }
     
-    // DX7 is a mono synth, but copy it to the right channel is available
     if ( buffer.getNumChannels() > 1 )
         buffer.copyFrom(1, 0, channelData, numSamples, 1);
 }
 
 //==============================================================================
-// This creates new instances of the plugin..
 AudioProcessor* JUCE_CALLTYPE createPluginFilter() {
     return new DexedAudioProcessor();
 }
 
-bool DexedAudioProcessor::getNextEvent(MidiBuffer::Iterator* iter,const int samplePos) {
-	if (hasMidiMessage && midiEventPos <= samplePos) {
-		*midiMsg = *nextMidi;
-		hasMidiMessage = iter->getNextEvent(*nextMidi, midiEventPos);
-		return true;
-	}
-	return false;
+bool DexedAudioProcessor::getNextEvent(MidiBuffer::Iterator* iter, const int samplePos) {
+    if (hasMidiMessage && midiEventPos <= samplePos) {
+        *midiMsg = *nextMidi;
+        hasMidiMessage = iter->getNextEvent(*nextMidi, midiEventPos);
+        return true;
+    }
+    return false;
 }
 
 void DexedAudioProcessor::processMidiMessage(const MidiMessage *msg) {
@@ -336,38 +364,23 @@ void DexedAudioProcessor::processMidiMessage(const MidiMessage *msg) {
     uint8_t cf0 = cmd & 0xf0;
     auto channel = msg->getChannel();
 
-
     if( controllers.mpeEnabled && channel != 1 &&
         (
-            (cf0 == 0xb0 && buf[1] == 74 ) || //timbre
-            (cf0 == 0xd0 ) || // aftertouch
-            (cf0 == 0xe0 ) // pb
-            )
+            (cf0 == 0xb0 && buf[1] == 74 ) ||
+            (cf0 == 0xd0 ) ||
+            (cf0 == 0xe0 )
         )
-    {
-        // OK so find my voice index
+    ) {
         int voiceIndex = -1;
-        for( int i=0; i<MAX_ACTIVE_NOTES; ++i )
-        {
-            if( voices[i].keydown && voices[i].channel == channel )
-            {
+        for( int i = 0; i < MAX_ACTIVE_NOTES; ++i ) {
+            if( voices[i].keydown && voices[i].channel == channel ) {
                 voiceIndex = i;
                 break;
             }
         }
-        if( voiceIndex >= 0 )
-        {
+        if( voiceIndex >= 0 ) {
             int i = voiceIndex;
             switch(cf0) {
-            // THIS IS COMMENTED SINCE mepTimbre and mpePressure is not used
-            // case 0xb0:
-            //     voices[i].mpeTimbre = (int)buf[2];
-            //     voices[i].dx7_note->mpeTimbre = (int)buf[2];
-            //     break;
-            // case 0xd0:
-            //     voices[i].mpePressure = (int)buf[1];
-            //     voices[i].dx7_note->mpePressure = (int)buf[1];
-            //     break;
             case 0xe0:
                 voices[i].mpePitchBend = (int)( buf[1] | (buf[2] << 7) );
                 voices[i].dx7_note->mpePitchBend = (int)( buf[1] | ( buf[2] << 7 ) );
@@ -375,88 +388,82 @@ void DexedAudioProcessor::processMidiMessage(const MidiMessage *msg) {
             }
         }
     }
-    else
-    {
+    else {
         switch(cmd & 0xf0) {
-        case 0x80 :
+        case 0x80:
             keyup(channel, buf[1], buf[2]);
-        return;
+            return;
 
-        case 0x90 :
+        case 0x90:
             if (!synthTuningState->is_standard_tuning() || !buf[2] ||
                 !MTS_HasMaster(mtsClient) || !MTS_ShouldFilterNote(mtsClient, buf[1], channel - 1))
                 keydown(channel, buf[1], buf[2]);
-        return;
-            
-        case 0xb0 : {
-            int ctrl = buf[1];
-            int value = buf[2];
-                switch(ctrl) {
-                case 1:
-                    controllers.modwheel_cc = value;
-                    controllers.refresh();
-                    break;
-                case 2:
-                    controllers.breath_cc = value;
-                    controllers.refresh();
-                    break;
-                case 4:
-                    controllers.foot_cc = value;
-                    controllers.refresh();
-                    break;
-                case 5:
-                    controllers.portamento_cc = value;
-                    break;
-                case 64:
-                    sustain = value > 63;
-                    if (!sustain) {
-                        for (int note = 0; note < MAX_ACTIVE_NOTES; note++) {
-                            if (voices[note].sustained && !voices[note].keydown) {
-                                voices[note].dx7_note->keyup();
-                                voices[note].sustained = false;
-                            }
-                        }
-                    }
-                    break;
-                case 65:
-                    controllers.portamento_enable_cc = value >= 64;
-                    break;
-                case 120:
-                    panic();
-                    break;
-                case 123:
-                    for (int note = 0; note < MAX_ACTIVE_NOTES; note++) {
-                        if (voices[note].keydown)
-                            keyup(channel, voices[note].midi_note, 0);
-                    }
-                    break;
-                default:
-                    TRACE("handle channel %d CC %d = %d", channel, ctrl, value);
-                    int channel_cc = (channel << 8) | ctrl;
-                    if ( mappedMidiCC.contains(channel_cc) ) {
-                        Ctrl *linkedCtrl = mappedMidiCC[channel_cc];
-                        
-                        // We are not publishing this in the DSP thread, moving that in the
-                        // event thread
-                        linkedCtrl->publishValueAsync((float) value / 127);
-                    }
-                    // this is used to notify the dialog that a CC value was received.
-                    lastCCUsed.setValue(channel_cc);
-                }
-            }
             return;
             
-        case 0xc0 :
+        case 0xb0: {
+            int ctrl  = buf[1];
+            int value = buf[2];
+            switch(ctrl) {
+            case 1:
+                controllers.modwheel_cc = value;
+                controllers.refresh();
+                break;
+            case 2:
+                controllers.breath_cc = value;
+                controllers.refresh();
+                break;
+            case 4:
+                controllers.foot_cc = value;
+                controllers.refresh();
+                break;
+            case 5:
+                controllers.portamento_cc = value;
+                break;
+            case 64:
+                sustain = value > 63;
+                if (!sustain) {
+                    for (int note = 0; note < MAX_ACTIVE_NOTES; note++) {
+                        if (voices[note].sustained && !voices[note].keydown) {
+                            voices[note].dx7_note->keyup();
+                            voices[note].sustained = false;
+                        }
+                    }
+                }
+                break;
+            case 65:
+                controllers.portamento_enable_cc = value >= 64;
+                break;
+            case 120:
+                panic();
+                break;
+            case 123:
+                for (int note = 0; note < MAX_ACTIVE_NOTES; note++)
+                    if (voices[note].keydown)
+                        keyup(channel, voices[note].midi_note, 0);
+                break;
+            default:
+                TRACE("handle channel %d CC %d = %d", channel, ctrl, value);
+                int channel_cc = (channel << 8) | ctrl;
+                if ( mappedMidiCC.contains(channel_cc) ) {
+                    Ctrl *linkedCtrl = mappedMidiCC[channel_cc];
+                    linkedCtrl->publishValueAsync((float) value / 127);
+                }
+                lastCCUsed.setValue(channel_cc);
+            }
+            return;
+        }
+            
+        case 0xc0:
             setCurrentProgram(buf[1]);
             return;
             
-        case 0xd0 :
+        case 0xd0:
             controllers.aftertouch_cc = buf[1];
             controllers.refresh();
             return;
         
-		case 0xe0 :
-			controllers.values_[kControllerPitch] = buf[1] | (buf[2] << 7);
+        case 0xe0:
+            controllers.values_[kControllerPitch] = buf[1] | (buf[2] << 7);
             return;
         }
     }
@@ -465,23 +472,16 @@ void DexedAudioProcessor::processMidiMessage(const MidiMessage *msg) {
 #define ACT(v) (v.keydown ? v.midi_note : -1)
 
 int DexedAudioProcessor::chooseNote(uint8_t pitch) {
-    // order of preference:
-    // 1. a note that is not playing
-    // 2. a note with its key up, playing the same pitch
-    // 3. a note with its key up, playing a different pitch
-    // 4. a note with its key down, playing the same pitch
-    // 5. a note with its key down, playing a different pitch
-    // break ties by preferring note with least recent keydown
-    int bestNote = currentNote;
+    int bestNote  = currentNote;
     int bestScore = -1;
-    int note = currentNote;
-    for (int i=0; i<MAX_ACTIVE_NOTES; i++) {
+    int note      = currentNote;
+    for (int i = 0; i < MAX_ACTIVE_NOTES; i++) {
         int score = 0;
         if ( !voices[note].dx7_note->isPlaying() ) score += 4;
-        if ( !voices[note].keydown ) score += 2;
-        if ( voices[note].midi_note == pitch ) score += 1;
+        if ( !voices[note].keydown )               score += 2;
+        if (  voices[note].midi_note == pitch )    score += 1;
         if ( (score > bestScore) || (score == bestScore && voices[note].keydown_seq < voices[bestNote].keydown_seq) ) {
-            bestNote = note;
+            bestNote  = note;
             bestScore = score;
         }
         note = (note + 1) % MAX_ACTIVE_NOTES;
@@ -497,59 +497,44 @@ void DexedAudioProcessor::keydown(uint8_t channel, uint8_t pitch, uint8_t velo) 
 
     pitch += tuningTranspositionShift();
     
-    if ( normalizeDxVelocity ) {
-        velo = ((float)velo) * 0.7874015; // 100/127
-    }
-  
+    if ( normalizeDxVelocity )
+        velo = ((float)velo) * 0.7874015;
 
     if( controllers.mpeEnabled ) {
         int note = currentNote;
-        for( int i=0; i<MAX_ACTIVE_NOTES; ++i ) {
+        for( int i = 0; i < MAX_ACTIVE_NOTES; ++i ) {
             if( voices[note].keydown && voices[note].channel == channel )
-            {
-                // If we get two keydowns on the same channel we are getting information from a non-mpe device
                 controllers.mpeEnabled = false;
-            }
             note = (note + 1) % MAX_ACTIVE_NOTES;
         }
     }
 
     bool triggerLfo = true;
-    for (int i=0; i<MAX_ACTIVE_NOTES; i++) {
-        if ( voices[i].keydown ) {
-            triggerLfo = false;
-            break;
-        }
+    for (int i = 0; i < MAX_ACTIVE_NOTES; i++) {
+        if ( voices[i].keydown ) { triggerLfo = false; break; }
     }
-    if ( triggerLfo ) {
-        lfo.keydown();
-    }
+    if ( triggerLfo ) lfo.keydown();
 
     int note = chooseNote(pitch);
-
     currentNote = (note + 1) % MAX_ACTIVE_NOTES;
-    voices[note].channel = channel;
-    voices[note].midi_note = pitch;
-    voices[note].velocity = velo;
-    voices[note].sustained = sustain;
-    voices[note].keydown = true;
+    voices[note].channel     = channel;
+    voices[note].midi_note   = pitch;
+    voices[note].velocity    = velo;
+    voices[note].sustained   = sustain;
+    voices[note].keydown     = true;
     voices[note].keydown_seq = nextKeydownSeq++;
-    // to avoid click, don't sync oscillators when voice stealing
     bool voice_steal = voices[note].dx7_note->isPlaying();
     voices[note].dx7_note->init(data, pitch, velo, channel, &controllers);
-    if ( data[136] && !voice_steal ) {
+    if ( data[136] && !voice_steal )
         voices[note].dx7_note->oscSync();
-    }
     if ( (voices[lastActiveVoice].midi_note != -1 && controllers.portamento_enable_cc)
-       && controllers.portamento_cc > 0 ) {
+       && controllers.portamento_cc > 0 )
         voices[note].dx7_note->initPortamento(*voices[lastActiveVoice].dx7_note);
-    }
 
     if ( monoMode ) {
-        for(int i=0; i<MAX_ACTIVE_NOTES; i++) {            
+        for (int i = 0; i < MAX_ACTIVE_NOTES; i++) {
             if ( voices[i].live ) {
-                // all keys are up, only transfer signal
-                if ( ! voices[i].keydown ) {
+                if ( !voices[i].keydown ) {
                     voices[i].live = false;
                     voices[note].dx7_note->transferSignal(*voices[i].dx7_note);
                     break;
@@ -562,13 +547,8 @@ void DexedAudioProcessor::keydown(uint8_t channel, uint8_t pitch, uint8_t velo) 
                 return;
             }
         }
-    }
-    else if ( !data[136] ) {
-        // if another note at the same pitch is playing, transfer phase
-        // to avoid unpredictable destructive interference. this can cause
-        // clicking when voice stealing, but we've tried to choose a voice
-        // to steal that will minimise the chances of clicking
-        for(int i=0; i<MAX_ACTIVE_NOTES; i++) {
+    } else if ( !data[136] ) {
+        for (int i = 0; i < MAX_ACTIVE_NOTES; i++) {
             if ( i != note && voices[i].dx7_note->isPlaying() && voices[i].midi_note == pitch ) {
                 voices[note].dx7_note->transferPhase(*voices[i].dx7_note);
                 break;
@@ -576,43 +556,42 @@ void DexedAudioProcessor::keydown(uint8_t channel, uint8_t pitch, uint8_t velo) 
         }
     }
 
- 
     voices[note].live = true;
-    lastActiveVoice = note;
-	//TRACE("activate %d [ %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d ]", pitch, ACT(voices[0]), ACT(voices[1]), ACT(voices[2]), ACT(voices[3]), ACT(voices[4]), ACT(voices[5]), ACT(voices[6]), ACT(voices[7]), ACT(voices[8]), ACT(voices[9]), ACT(voices[10]), ACT(voices[11]), ACT(voices[12]), ACT(voices[13]), ACT(voices[14]), ACT(voices[15]));
+    lastActiveVoice   = note;
+
+    // NCS: notify drift engine of new note-on and activate hybrid oscillator
+    driftEngine.noteOn(note);
+    hybridOscs[note].noteOn(pitch, (float)velo / 127.0f);
 }
 
 void DexedAudioProcessor::keyup(uint8_t chan, uint8_t pitch, uint8_t velo) {
     pitch += tuningTranspositionShift();
 
     int note;
-    for (note=0; note<MAX_ACTIVE_NOTES; ++note) {
-        if ( ( ( controllers.mpeEnabled && voices[note].channel == chan ) || // MPE node - find voice by channel
-               (!controllers.mpeEnabled && voices[note].midi_note == pitch ) ) && // regular mode find voice by pitch
-             voices[note].keydown ) // but still only grab the one which is keydown
+    for (note = 0; note < MAX_ACTIVE_NOTES; ++note) {
+        if ( ( ( controllers.mpeEnabled && voices[note].channel == chan ) ||
+               (!controllers.mpeEnabled && voices[note].midi_note == pitch) ) &&
+             voices[note].keydown )
         {
             voices[note].keydown = false;
-			//TRACE("deactivate %d [ %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d ]", pitch, ACT(voices[0]), ACT(voices[1]), ACT(voices[2]), ACT(voices[3]), ACT(voices[4]), ACT(voices[5]), ACT(voices[6]), ACT(voices[7]), ACT(voices[8]), ACT(voices[9]), ACT(voices[10]), ACT(voices[11]), ACT(voices[12]), ACT(voices[13]), ACT(voices[14]), ACT(voices[15]));
             break;
         }
     }
     
-    // note not found ?
     if ( note >= MAX_ACTIVE_NOTES ) {
-		TRACE("note found ??? %d [ %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d ]", pitch, ACT(voices[0]), ACT(voices[1]), ACT(voices[2]), ACT(voices[3]), ACT(voices[4]), ACT(voices[5]), ACT(voices[6]), ACT(voices[7]), ACT(voices[8]), ACT(voices[9]), ACT(voices[10]), ACT(voices[11]), ACT(voices[12]), ACT(voices[13]), ACT(voices[14]), ACT(voices[15]));
+        TRACE("note found ??? %d", pitch);
         return;
     }
     
     if ( monoMode ) {
         int highNote = -1;
-        int target = 0;
-        for (int i=0; i<MAX_ACTIVE_NOTES;i++) {
+        int target   = 0;
+        for (int i = 0; i < MAX_ACTIVE_NOTES; i++) {
             if ( voices[i].keydown && voices[i].midi_note > highNote ) {
-                target = i;
+                target   = i;
                 highNote = voices[i].midi_note;
             }
         }
-        
         if ( highNote != -1 && voices[note].live ) {
             voices[note].live = false;
             voices[target].live = true;
@@ -624,56 +603,48 @@ void DexedAudioProcessor::keyup(uint8_t chan, uint8_t pitch, uint8_t velo) {
         voices[note].sustained = true;
     } else {
         voices[note].dx7_note->keyup();
+        // NCS: deactivate hybrid oscillator on key up
+        hybridOscs[note].noteOff();
     }
 }
 
-int DexedAudioProcessor::tuningTranspositionShift()
-{
-    if( synthTuningState->is_standard_tuning() || ! controllers.transpose12AsScale )
+int DexedAudioProcessor::tuningTranspositionShift() {
+    if( synthTuningState->is_standard_tuning() || !controllers.transpose12AsScale )
         return data[144] - 24;
-    else
-    {
+    else {
         int d144 = data[144];
-        if( d144 % 12 == 0 )
-        {
+        if( d144 % 12 == 0 ) {
             int oct = (d144 - 24) / 12;
-            int res = oct * synthTuningState->scale_length();
-            return res;
-        }
-        else
+            return oct * synthTuningState->scale_length();
+        } else
             return data[144] - 24;
     }
 }
 
 void DexedAudioProcessor::panic() {
-    for(int i=0;i<MAX_ACTIVE_NOTES;i++) {
+    for (int i = 0; i < MAX_ACTIVE_NOTES; i++) {
         voices[i].midi_note = -1;
-        voices[i].keydown = false;
-        voices[i].live = false;
-        if ( voices[i].dx7_note != NULL ) {
+        voices[i].keydown   = false;
+        voices[i].live      = false;
+        if ( voices[i].dx7_note != NULL )
             voices[i].dx7_note->oscSync();
-        }
+        // NCS: reset hybrid oscillators on panic
+        hybridOscs[i].reset();
     }
     keyboardState.reset();
 }
 
 void DexedAudioProcessor::handleIncomingMidiMessage(MidiInput* source, const MidiMessage& message) {
-    if ( message.isActiveSense() ) 
-        return;
+    if ( message.isActiveSense() ) return;
 
 #ifdef IMPLEMENT_MidiMonitor
-    sysexComm.inActivity = true; // indicate to MidiMonitor that a MIDI messages (other than Active Sense) is received
-#endif //IMPLEMENT_MidiMonitor
+    sysexComm.inActivity = true;
+#endif
 
     const uint8 *buf = message.getRawData();
     int sz = message.getRawDataSize();
 
-    //TRACE("%X %X %X %X %X %X", buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6]);
-
-    if ( ! message.isSysEx() )
-        return;
-
-    // test if it is a Yamaha Sysex
+    if ( !message.isSysEx() ) return;
     if ( buf[1] != 0x43 ) {
         TRACE("not a yamaha sysex %d", buf[1]);
         return;
@@ -681,73 +652,37 @@ void DexedAudioProcessor::handleIncomingMidiMessage(MidiInput* source, const Mid
 
     int substatus = buf[2] >> 4;
     switch(substatus) {
-        case 0 : {
-            // single voice dump
+        case 0: {
             if ( buf[3] == 0 ) {
-                if ( sz < 156 ) {
-                    TRACE("wrong single voice datasize %d", sz);
-                    return;
-                }
-                if ( updateProgramFromSysex(buf+6) )
-                    TRACE("bad checksum when updating program from sysex message");
+                if ( sz < 156 ) { TRACE("wrong single voice datasize %d", sz); return; }
+                if ( updateProgramFromSysex(buf+6) ) TRACE("bad checksum");
             }
-
-            // 32 voice dump
             if ( buf[3] == 9 ) {
-                if ( sz < 4104 ) {
-                    TRACE("wrong 32 voice dump data size %d", sz);
-                    return;
-                }
-
+                if ( sz < 4104 ) { TRACE("wrong 32 voice dump data size %d", sz); return; }
                 Cartridge received;
                 if ( received.load(buf, sz) == 0 ) {
                     loadCartridge(received);
                     setCurrentProgram(0);
                 }
             }
-        }
-        break;
-        case 1 : {
-            // parameter change
-            if ( sz < 7 ) {
-            TRACE("wrong single voice datasize %d", sz);
-            return;
-            }
-
+        } break;
+        case 1: {
+            if ( sz < 7 ) { TRACE("wrong single voice datasize %d", sz); return; }
             uint8 offset = (buf[3] << 7) + buf[4];
-            uint8 value = buf[5];
-
+            uint8 value  = buf[5];
             TRACE("parameter change message offset:%d value:%d", offset, value);
-
-            if ( offset > 155 ) {
-                TRACE("wrong offset size");
-                return;
-            }
-
-            if ( offset == 155 ) {
-                unpackOpSwitch(value);
-            } else {
-                data[offset] = value;
-            }
-        }
-        break;
+            if ( offset > 155 ) { TRACE("wrong offset size"); return; }
+            if ( offset == 155 ) unpackOpSwitch(value);
+            else data[offset] = value;
+        } break;
         case 2: {
-            if ( buf[3] == 0 ) {
-                // single voice request
-                sendCurrentSysexProgram();
-            } else if ( buf[3] == 9 ) {
-                // cart request
-                sendCurrentSysexCartridge();
-            } else {
-                TRACE("Unknown voice request: %d", buf[3]);
-            }
-        }
-        return;
-
-        default: {
+            if ( buf[3] == 0 ) sendCurrentSysexProgram();
+            else if ( buf[3] == 9 ) sendCurrentSysexCartridge();
+            else TRACE("Unknown voice request: %d", buf[3]);
+        } return;
+        default:
             TRACE("unknown sysex substatus: %d", substatus);
-        }
-        return;
+            return;
     }
 
     forceRefreshUI = true;
@@ -760,17 +695,10 @@ int DexedAudioProcessor::getEngineType() {
 
 void DexedAudioProcessor::setEngineType(int tp) {
     TRACE("settings engine %d", tp);
-
-    switch (tp)  {
-        case DEXED_ENGINE_MARKI:
-            controllers.core = &engineMkI;
-            break;
-        case DEXED_ENGINE_OPL:
-            controllers.core = &engineOpl;
-            break;
-        default:
-            controllers.core = &engineMsfa;
-            break;
+    switch (tp) {
+        case DEXED_ENGINE_MARKI:  controllers.core = &engineMkI; break;
+        case DEXED_ENGINE_OPL:    controllers.core = &engineOpl; break;
+        default:                  controllers.core = &engineMsfa; break;
     }
     engineType = tp;
 }
@@ -780,106 +708,59 @@ void DexedAudioProcessor::setMonoMode(bool mode) {
     monoMode = mode;
 }
 
-// ====================================================================
 bool DexedAudioProcessor::peekVoiceStatus() {
-    if ( currentNote == -1 )
-        return false;
-
-    // we are trying to find the last "keydown" note
+    if ( currentNote == -1 ) return false;
     int note = currentNote;
     for (int i = 0; i < MAX_ACTIVE_NOTES; i++) {
         if (voices[note].keydown) {
             voices[note].dx7_note->peekVoiceStatus(voiceStatus);
             return true;
         }
-        if ( --note < 0 )
-            note = MAX_ACTIVE_NOTES-1;
+        if ( --note < 0 ) note = MAX_ACTIVE_NOTES - 1;
     }
-
-    // not found; try a live note
     note = currentNote;
     for (int i = 0; i < MAX_ACTIVE_NOTES; i++) {
         if (voices[note].live) {
             voices[note].dx7_note->peekVoiceStatus(voiceStatus);
             return true;
         }
-        if ( --note < 0 )
-            note = MAX_ACTIVE_NOTES-1;
+        if ( --note < 0 ) note = MAX_ACTIVE_NOTES - 1;
     }
-
     return true;
 }
 
-const String DexedAudioProcessor::getInputChannelName (int channelIndex) const {
-    return String (channelIndex + 1);
-}
-
-const String DexedAudioProcessor::getOutputChannelName (int channelIndex) const {
-    return String (channelIndex + 1);
-}
-
-bool DexedAudioProcessor::isInputChannelStereoPair (int index) const {
-    return true;
-}
-
-bool DexedAudioProcessor::isOutputChannelStereoPair (int index) const {
-    return true;
-}
+const String DexedAudioProcessor::getInputChannelName  (int i) const { return String(i + 1); }
+const String DexedAudioProcessor::getOutputChannelName (int i) const { return String(i + 1); }
+bool DexedAudioProcessor::isInputChannelStereoPair  (int) const { return true; }
+bool DexedAudioProcessor::isOutputChannelStereoPair (int) const { return true; }
 
 bool DexedAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const {
     return layouts.getMainOutputChannelSet() == AudioChannelSet::mono()
-                || layouts.getMainOutputChannelSet() == AudioChannelSet::stereo();
+        || layouts.getMainOutputChannelSet() == AudioChannelSet::stereo();
 }
 
-bool DexedAudioProcessor::acceptsMidi() const {
-    return true;
-}
+bool DexedAudioProcessor::acceptsMidi() const { return true; }
+bool DexedAudioProcessor::producesMidi() const { return true; }
+bool DexedAudioProcessor::silenceInProducesSilenceOut() const { return false; }
+double DexedAudioProcessor::getTailLengthSeconds() const { return 0.0; }
+const String DexedAudioProcessor::getName() const { return JucePlugin_Name; }
 
-bool DexedAudioProcessor::producesMidi() const {
-    return true;
-}
-
-bool DexedAudioProcessor::silenceInProducesSilenceOut() const {
-    return false;
-}
-
-double DexedAudioProcessor::getTailLengthSeconds() const {
-    return 0.0;
-}
-
-const String DexedAudioProcessor::getName() const {
-    return JucePlugin_Name;
-}
-
-//==============================================================================
-bool DexedAudioProcessor::hasEditor() const {
-    return true; // (change this to false if you choose to not supply an editor)
-}
+bool DexedAudioProcessor::hasEditor() const { return true; }
 
 void DexedAudioProcessor::updateUI() {
-    // notify host something has changed
     updateHostDisplay();
- 
     AudioProcessorEditor *editor = getActiveEditor();
-    if ( editor == NULL ) {
-        return;
-    }
-	DexedAudioProcessorEditor *dexedEditor = (DexedAudioProcessorEditor *) editor;
+    if ( editor == NULL ) return;
+    DexedAudioProcessorEditor *dexedEditor = (DexedAudioProcessorEditor *) editor;
     dexedEditor->updateUI();
 }
 
 AudioProcessorEditor* DexedAudioProcessor::createEditor() {
-    AudioProcessorEditor* editor = new DexedAudioProcessorEditor (this);
-    return editor;
+    return new DexedAudioProcessorEditor(this);
 }
 
-void DexedAudioProcessor::setZoomFactor(float factor) {
-    zoomFactor = factor;
-}
-
-void DexedAudioProcessor::handleAsyncUpdate() {
-    updateUI();
-}
+void DexedAudioProcessor::setZoomFactor(float factor) { zoomFactor = factor; }
+void DexedAudioProcessor::handleAsyncUpdate() { updateUI(); }
 
 void dexed_trace(const char *source, const char *fmt, ...) {
     char output[4096];
@@ -887,23 +768,20 @@ void dexed_trace(const char *source, const char *fmt, ...) {
     va_start(argptr, fmt);
     vsnprintf(output, 4095, fmt, argptr);
     va_end(argptr);
-
     String dest;
     dest << source << " " << output;
     Logger::writeToLog(dest);
 }
 
-void DexedAudioProcessor::resetTuning(std::shared_ptr<TuningState> t)
-{
+void DexedAudioProcessor::resetTuning(std::shared_ptr<TuningState> t) {
     synthTuningState = t;
     synthTuningStateLast = t;
-    for( int i=0; i<MAX_ACTIVE_NOTES; ++i )
+    for( int i = 0; i < MAX_ACTIVE_NOTES; ++i )
         if( voices[i].dx7_note != nullptr )
             voices[i].dx7_note->tuning_state_ = synthTuningState;
 }
 
-void DexedAudioProcessor::retuneToStandard()
-{
+void DexedAudioProcessor::retuneToStandard() {
     currentSCLData = "";
     currentKBMData = "";
     resetTuning(createStandardTuning());
@@ -912,148 +790,79 @@ void DexedAudioProcessor::retuneToStandard()
 void DexedAudioProcessor::applySCLTuning() {
     FileChooser fc( "Please select a scale (.scl) file.", File(), "*.scl" );
     File s;
-
-    // loop to enforce the proper selection
     for (;;) {
-        // open file chooser dialog
-        if (!fc.browseForFileToOpen())
-            // User cancelled
-            return;
+        if (!fc.browseForFileToOpen()) return;
         s = fc.getResult();
-
-        // enforce file extenstion ''.scl''.
-        // (reason: the extension ''.scl'' is mandatory according to 
-        // ''https://www.huygens-fokker.org/scala/scl_format.html''
         if (s.getFileExtension() != ".scl") {
             AlertWindow::showMessageBox(AlertWindow::WarningIcon, "Invalid file type!", "Only files with the \".scl\" extension (in lowercase!) are allowed.");
             continue;
         }
-
-        // enforce to select file below the max limit16KB sized files
         if (s.getSize() > MAX_SCL_KBM_FILE_SIZE) {
-            std::string msg;
-            msg = "File size exceeded the maximum limit of " + std::to_string(MAX_SCL_KBM_FILE_SIZE) + " bytes.";
-            AlertWindow::showMessageBox(AlertWindow::WarningIcon, "File size error!", msg);
+            AlertWindow::showMessageBox(AlertWindow::WarningIcon, "File size error!",
+                "File size exceeded the maximum limit of " + std::to_string(MAX_SCL_KBM_FILE_SIZE) + " bytes.");
             continue;
         }
-
-        // enforce to select non-empty file
-        // TODO: check, whether zero sized files may occur indeed here; if not, delete this if-statement, please
         if (s.getSize() == 0) {
-            std::string msg;
-            msg = "File is empty.";
-            AlertWindow::showMessageBox(AlertWindow::WarningIcon, "File size error!", msg);
+            AlertWindow::showMessageBox(AlertWindow::WarningIcon, "File size error!", "File is empty.");
             continue;
         }
-
-        // try to apply the SCL file 
         applySCLTuning(s);
-
-        // exit the loop
         break;
     }
 }
 
 void DexedAudioProcessor::applySCLTuning(File s) {
-    std::string sclcontents = s.loadFileAsString().toStdString();
-    applySCLTuning(sclcontents);
+    applySCLTuning(s.loadFileAsString().toStdString());
 }
 
 void DexedAudioProcessor::applySCLTuning(std::string sclcontents) {
-    if( currentKBMData.size() < 1 )
-    {
-        auto t = createTuningFromSCLData( sclcontents );
-        if (t != nullptr) {            
-            resetTuning(t); // update tuning            
-            currentSCLData = sclcontents; // remember this SCL data            
-            synthTuningStateLast = t; // remember this whole state as a "last good working state"
-        }
-        else {            
-            resetTuning(synthTuningStateLast); // revert to the "last good working state"
-        }
-    }
-    else
-    {
-        auto t = createTuningFromSCLAndKBMData( sclcontents, currentKBMData );
-        if (t != nullptr) {            
-            resetTuning(t); // update tuning            
-            currentSCLData = sclcontents; // remember this SCL data            
-            synthTuningStateLast = t; // remember this whole state as a "last good working state"
-        }
-        else {            
-            resetTuning(synthTuningStateLast); // revert to the "last good working state"
-        }
+    if( currentKBMData.size() < 1 ) {
+        auto t = createTuningFromSCLData(sclcontents);
+        if (t) { resetTuning(t); currentSCLData = sclcontents; synthTuningStateLast = t; }
+        else     resetTuning(synthTuningStateLast);
+    } else {
+        auto t = createTuningFromSCLAndKBMData(sclcontents, currentKBMData);
+        if (t) { resetTuning(t); currentSCLData = sclcontents; synthTuningStateLast = t; }
+        else     resetTuning(synthTuningStateLast);
     }
 }
 
 void DexedAudioProcessor::applyKBMMapping() {
     FileChooser fc( "Please select a keyboard map (.kbm) file.", File(), "*.kbm" );
     File s;
-
-    // loop to enforce the proper selection
     for (;;) {
-        // invoke file chooser dialog
-        if (!fc.browseForFileToOpen())            
-            return; // User cancelled
+        if (!fc.browseForFileToOpen()) return;
         s = fc.getResult();
-
-        // enforce file extenstion ''.kbm''.
-        // (reason: the extension ''.kbm'' is mandatory according to 
-        // ''https://www.huygens-fokker.org/scala/scl_format.html''
         if (s.getFileExtension() != ".kbm") {
             AlertWindow::showMessageBox(AlertWindow::WarningIcon, "Invalid file type!", "Only files with the \".kbm\" extension (in lowercase!) are allowed.");
             continue;
         }
-
-        // enforce to select file below the max limit16KB sized files
         if (s.getSize() > MAX_SCL_KBM_FILE_SIZE) {
-            std::string msg;
-            msg = "File size exceeded the maximum limit of " + std::to_string(MAX_SCL_KBM_FILE_SIZE) + " bytes.";
-            AlertWindow::showMessageBox(AlertWindow::WarningIcon, "File size error!", msg);
+            AlertWindow::showMessageBox(AlertWindow::WarningIcon, "File size error!",
+                "File size exceeded the maximum limit of " + std::to_string(MAX_SCL_KBM_FILE_SIZE) + " bytes.");
             continue;
         }
-
-        // enforce to select non-empty file
-        // TODO: check, whether zero sized files may occur indeed here; if not, delete this if-statement, please
         if (s.getSize() == 0) {
-            std::string msg;
-            msg = "File is empty.";
-            AlertWindow::showMessageBox(AlertWindow::WarningIcon, "File size error!", msg);
+            AlertWindow::showMessageBox(AlertWindow::WarningIcon, "File size error!", "File is empty.");
             continue;
         }
-
-        // try to apply KBM mapping
         applyKBMMapping(s);
-
-        // exit the loop
         break;
     }
 }
 
-void DexedAudioProcessor::applyKBMMapping( File s )
-{
-    std::string kbmcontents = s.loadFileAsString().toStdString();
-    applyKBMMapping(kbmcontents);
+void DexedAudioProcessor::applyKBMMapping(File s) {
+    applyKBMMapping(s.loadFileAsString().toStdString());
 }
 
-void DexedAudioProcessor::applyKBMMapping(std::string kbmcontents) {  
+void DexedAudioProcessor::applyKBMMapping(std::string kbmcontents) {
     if( currentSCLData.size() < 1 ) {
         auto t = createTuningFromKBMData(kbmcontents);
-        if (t != nullptr) {            
-            resetTuning(t); // update tuning
-            currentKBMData = kbmcontents; // remember this KBM data
-            synthTuningStateLast = t; // remember this whole state as a "last good working state"
-        } else {            
-            resetTuning(synthTuningStateLast); // revert to the "last good working state"
-        }
+        if (t) { resetTuning(t); currentKBMData = kbmcontents; synthTuningStateLast = t; }
+        else     resetTuning(synthTuningStateLast);
     } else {
-        auto t = createTuningFromSCLAndKBMData( currentSCLData, kbmcontents );
-        if (t != nullptr) {            
-            resetTuning(t); // update tuning            
-            currentKBMData = kbmcontents; // remember this KBM data            
-            synthTuningStateLast = t; // remember this whole state as a "last good working state"
-        } else {            
-            resetTuning(synthTuningStateLast); // revert to "last good working state"
-        }
+        auto t = createTuningFromSCLAndKBMData(currentSCLData, kbmcontents);
+        if (t) { resetTuning(t); currentKBMData = kbmcontents; synthTuningStateLast = t; }
+        else     resetTuning(synthTuningStateLast);
     }
 }

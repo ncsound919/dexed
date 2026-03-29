@@ -38,6 +38,12 @@
 #include "EngineMkI.h"
 #include "EngineOpl.h"
 
+// NCS: Harmonic, bass, drift, hybrid oscillator modules
+#include "HarmonicEngine.h"
+#include "BassAccompaniment.h"
+#include "DriftEngine.h"
+#include "HybridOscillator.h"
+
 struct ProcessorVoice {
     int channel;
     int midi_note;
@@ -58,47 +64,27 @@ enum DexedEngineResolution {
 };
 
 /// Maximum allowed size for SCL and KBM files.
-/// (COMMENT: Since none of the 5175 .scl files in the Scala archive
-/// at https://www.huygens-fokker.org/scala/downloads.html#scales
-/// exceed 6 KB (in 25th Mar 2024), a maximum size of 16 KB appears
-/// to be a practical choice.)
 const int MAX_SCL_KBM_FILE_SIZE = 16384;
 
 //==============================================================================
-/**
-*/
 class DexedAudioProcessor  : public AudioProcessor, public AsyncUpdater, public MidiInputCallback, public clap_juce_extensions::clap_properties
 {
     static const int MAX_ACTIVE_NOTES = 16;
     ProcessorVoice voices[MAX_ACTIVE_NOTES];
     int currentNote;
 
-    // The original DX7 had one single LFO. Later units had an LFO per note.
     Lfo lfo;
 
     bool sustain;
     bool monoMode;
     
-    // Extra buffering for when GetSamples wants a buffer not a multiple of N
     float extra_buf[N];
     int extra_buf_size;
 
     int currentProgram;
-    
-    /**
-     * The last time the state was save, to be able to bypass a VST host bug.
-     */
     long lastStateSave;
-    
-    /**
-     * Plugin fx (the filter)
-     */
     PluginFx fx;
 
-    /**
-     * This flag is used in the audio thread to know if the voice has changed
-     * and needs to be updated.
-     */
     bool refreshVoice;
     bool normalizeDxVelocity;
     bool sendSysexChange;
@@ -106,18 +92,13 @@ class DexedAudioProcessor  : public AudioProcessor, public AsyncUpdater, public 
     void processMidiMessage(const MidiMessage *msg);
     void keydown(uint8_t chan, uint8_t pitch, uint8_t velo);
     void keyup(uint8_t, uint8_t pitch, uint8_t velo);
-    
-    /**
-     * this is called from the Audio thread to tell
-     * to update the UI / hostdata 
-     */
     void handleAsyncUpdate() override;
     void initCtrl();
 
-	MidiMessage* nextMidi,*midiMsg;
-	bool hasMidiMessage;
+    MidiMessage* nextMidi, *midiMsg;
+    bool hasMidiMessage;
     int midiEventPos;
-	bool getNextEvent(MidiBuffer::Iterator* iter,const int samplePos);
+    bool getNextEvent(MidiBuffer::Iterator* iter, const int samplePos);
     
     void handleIncomingMidiMessage(MidiInput* source, const MidiMessage& message) override;
     uint32_t engineType;
@@ -127,13 +108,16 @@ class DexedAudioProcessor  : public AudioProcessor, public AsyncUpdater, public 
     EngineOpl engineOpl;
 
     void resolvAppDir();
-    
     void unpackOpSwitch(char packOpValue);
     void packOpSwitch();
 
     float zoomFactor = 1;
 
-public :
+    // NCS: last chord root played by harmonicEngine (for bassEngine handoff)
+    int ncsLastChordRoot = -1;
+    std::vector<int> ncsLastChordNotes;
+
+public:
     // in MIDI units (0x4000 is neutral)
     Controllers controllers;
     StringArray programNames;
@@ -146,13 +130,12 @@ public :
     
     bool forceRefreshUI;
     float vuSignal;
-    double vuDecayFactor = 0.999361; // (for 48 kHz sampling rate)
+    double vuDecayFactor = 0.999361;
     bool showKeyboard;
     int getEngineType();
     void setEngineType(int rs);
     
     HashMap<int, Ctrl*> mappedMidiCC;
-    
     Array<Ctrl*> ctrl;
 
     OperatorCtrl opCtrl[6];
@@ -176,6 +159,13 @@ public :
     std::unique_ptr<Ctrl> tune;
     std::unique_ptr<Ctrl> monoModeCtrl;
 
+    // NCS: public engine instances so UI panels can configure them
+    HarmonicEngine  harmonicEngine;
+    BassAccompaniment bassEngine;
+    DriftEngine     driftEngine;
+    std::array<HybridOscillator, MAX_ACTIVE_NOTES> hybridOscs;
+    float hybridMixLevel = 0.3f;   // 0 = FM only, 1 = full hybrid mix
+
     void loadCartridge(Cartridge &cart);
     void setDxValue(int offset, int v);
 
@@ -188,9 +178,7 @@ public :
     void releaseResources() override;
     void processBlock (AudioSampleBuffer& buffer, MidiBuffer& midiMessages) override;
     void panic();
-    bool isMonoMode() {
-        return monoMode;
-    }
+    bool isMonoMode() { return monoMode; }
     void setMonoMode(bool mode);
     
     void copyToClipboard(int srcOp);
@@ -234,14 +222,12 @@ public :
     void setCurrentProgram(int index) override;
     const String getProgramName (int index) override;
     void changeProgramName(int index, const String& newName) override;
-    void resetToInitVoice() ;
+    void resetToInitVoice();
     
     //==============================================================================
     void getStateInformation (MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
     
-    // this is kept up to date with the midi messages that arrive, and the UI component
-    // registers with it so it can represent the incoming messages
     MidiKeyboardState keyboardState;
     void unbindUI();
 
@@ -256,21 +242,12 @@ public :
 
     MTSClient *mtsClient;
     std::shared_ptr<TuningState> synthTuningState;
-
-    // holds the previous working tuning state;
-    // used to restore tuning state when there was a problem 
-    // with loading/applying a new .SCL and/or .KBM file 
     std::shared_ptr<TuningState> synthTuningStateLast;
 
-    // Prompt for a file
     void applySCLTuning();
     void applyKBMMapping();
-
-    // Load a file
     void applySCLTuning(File sclf);
     void applyKBMMapping(File kbmf);
-
-    // Load from text
     void applySCLTuning(std::string scld);
     void applyKBMMapping(std::string kbmd);
     
@@ -281,15 +258,13 @@ public :
     std::string currentSCLData = "";
     std::string currentKBMData = "";
     void setZoomFactor(float factor);
-    float getZoomFactor() {
-        return zoomFactor;
-    }    
+    float getZoomFactor() { return zoomFactor; }
+
 private:
     int chooseNote(uint8_t pitch);
     int32_t nextKeydownSeq;;
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DexedAudioProcessor)
-
 };
 
 #endif  // PLUGINPROCESSOR_H_INCLUDED
