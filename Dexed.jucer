@@ -137,6 +137,18 @@
         <FILE id="sLtEjn" name="libMTSClient.h" compile="0" resource="0" file="libs/MTS-ESP/Client/libMTSClient.h"
               xcodeResource="0"/>
       </GROUP>
+      <GROUP id="{NCS0001-0000-0000-0000-000000000001}" name="ncs-harmonic">
+        <FILE id="NCSha1" name="HarmonicEngine.cpp" compile="1" resource="0" file="Source/HarmonicEngine.cpp"/>
+        <FILE id="NCSha2" name="HarmonicEngine.h" compile="0" resource="0" file="Source/HarmonicEngine.h"/>
+        <FILE id="NCSba1" name="BassAccompaniment.cpp" compile="1" resource="0" file="Source/BassAccompaniment.cpp"/>
+        <FILE id="NCSba2" name="BassAccompaniment.h" compile="0" resource="0" file="Source/BassAccompaniment.h"/>
+      </GROUP>
+      <GROUP id="{NCS0002-0000-0000-0000-000000000002}" name="ncs-drift-hybrid">
+        <FILE id="NCSdr1" name="DriftEngine.cpp" compile="1" resource="0" file="Source/DriftEngine.cpp"/>
+        <FILE id="NCSdr2" name="DriftEngine.h" compile="0" resource="0" file="Source/DriftEngine.h"/>
+        <FILE id="NCShy1" name="HybridOscillator.cpp" compile="1" resource="0" file="Source/HybridOscillator.cpp"/>
+        <FILE id="NCShy2" name="HybridOscillator.h" compile="0" resource="0" file="Source/HybridOscillator.h"/>
+      </GROUP>
       <FILE id="pBbZ9Y" name="Dexed.h" compile="0" resource="0" file="Source/Dexed.h"/>
       <FILE id="Yp2cX4" name="PluginProcessor.cpp" compile="1" resource="0"
             file="Source/PluginProcessor.cpp"/>

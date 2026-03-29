@@ -59,6 +59,12 @@ target_sources(${BaseTargetName} PRIVATE
 	SysexComm.cpp
 	TuningShow.cpp
 	VUMeter.cpp
+        # NCS: Harmonic & accompaniment engine
+        HarmonicEngine.cpp
+        BassAccompaniment.cpp
+        # NCS: Drift & hybrid oscillator
+        DriftEngine.cpp
+        HybridOscillator.cpp
         msfa/dx7note.cc
         msfa/env.cc
         msfa/exp2.cc
